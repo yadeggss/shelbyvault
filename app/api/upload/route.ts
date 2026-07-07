@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
         blobData,
         signer: account,
         blobName,
-        expirationMicros: BigInt(Date.now() * 1000 + 365 * 24 * 60 * 60 * 1_000_000),
+       expirationMicros: Date.now() * 1000 + 365 * 24 * 60 * 60 * 1_000_000,
       });
 
       blobUrls.push(blobName);
