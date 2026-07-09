@@ -1,17 +1,18 @@
 "use client";
-import { useWallet } from "@aptos-labs/wallet-adapter-react";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Upload, X, Plus } from "lucide-react";
+import { useWallet } from "@aptos-labs/wallet-adapter-react";
 
 const SEVERITY_OPTIONS = ["rug", "drain", "theft", "suspicious"];
 
 export default function UploadPage() {
+  const { account, connected } = useWallet();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [severity, setSeverity] = useState("suspicious");
@@ -20,7 +21,28 @@ export default function UploadPage() {
   const [tagInput, setTagInput] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [dragging, setDragging] = useState(false);
-  const { account, connected } = useWallet();
+  const [submitting, setSubmitting] = useState(false);
+
+  // Load draft on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("shelbyvault-draft");
+    if (saved) {
+      try {
+        const draft = JSON.parse(saved);
+        setTitle(draft.title || "");
+        setDescription(draft.description || "");
+        setSeverity(draft.severity || "suspicious");
+        setVisibility(draft.visibility || "public");
+        setTags(draft.tags || []);
+      } catch {}
+    }
+  }, []);
+
+  // Save draft on change
+  useEffect(() => {
+    const draft = { title, description, severity, visibility, tags };
+    localStorage.setItem("shelbyvault-draft", JSON.stringify(draft));
+  }, [title, description, severity, visibility, tags]);
 
   function addTag() {
     const trimmed = tagInput.trim().toLowerCase();
@@ -52,64 +74,68 @@ export default function UploadPage() {
   }
 
   async function handleSubmit() {
-  if (!connected || !account) {
-    alert("Please connect your wallet first.");
-    return;
-  }
+    if (!connected || !account) {
+      alert("Please connect your wallet first.");
+      return;
+    }
 
-  if (!title) {
-    alert("Please add a title.");
-    return;
-  }
+    if (!title) {
+      alert("Please add a title.");
+      return;
+    }
 
-  try {
-    let blobUrls: string[] = [];
+    setSubmitting(true);
 
-    // Upload files to Shelby if any
-    if (files.length > 0) {
-      const formData = new FormData();
-      files.forEach((file) => formData.append("files", file));
+    try {
+      let blobUrls: string[] = [];
 
-      const uploadRes = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
+      if (files.length > 0) {
+        const formData = new FormData();
+        files.forEach((file) => formData.append("files", file));
 
-      if (!uploadRes.ok) {
-        alert("File upload to Shelby failed. Try again.");
-        return;
+        const uploadRes = await fetch("/api/upload", {
+          method: "POST",
+          body: formData,
+        });
+
+        if (!uploadRes.ok) {
+          alert("File upload to Shelby failed. Try again.");
+          setSubmitting(false);
+          return;
+        }
+
+        const uploadData = await uploadRes.json();
+        blobUrls = uploadData.blobUrls;
       }
 
-      const uploadData = await uploadRes.json();
-      blobUrls = uploadData.blobUrls;
-    }
+      const res = await fetch("/api/cases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title,
+          description,
+          severity,
+          visibility,
+          ownerWallet: account.address.toString(),
+          blobUrls,
+          tags,
+        }),
+      });
 
-    // Save case to database
-    const res = await fetch("/api/cases", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        title,
-        description,
-        severity,
-        visibility,
-        ownerWallet: account.address.toString(),
-        blobUrls,
-        tags,
-      }),
-    });
-
-    if (res.ok) {
-      const data = await res.json();
-      window.location.href = `/case/${data.id}`;
-    } else {
-      alert("Failed to submit case. Try again.");
+      if (res.ok) {
+        const data = await res.json();
+        localStorage.removeItem("shelbyvault-draft");
+        window.location.href = `/case/${data.id}`;
+      } else {
+        alert("Failed to submit case. Try again.");
+        setSubmitting(false);
+      }
+    } catch (err) {
+      console.error(err);
+      alert("Something went wrong. Check the console.");
+      setSubmitting(false);
     }
-  } catch (err) {
-    console.error(err);
-    alert("Something went wrong. Check the console.");
   }
-}
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -125,7 +151,6 @@ export default function UploadPage() {
           <CardTitle className="text-base">Case Details</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Title */}
           <div className="space-y-1">
             <label className="text-sm font-medium">Title</label>
             <Input
@@ -135,7 +160,6 @@ export default function UploadPage() {
             />
           </div>
 
-          {/* Description */}
           <div className="space-y-1">
             <label className="text-sm font-medium">Description</label>
             <Textarea
@@ -146,7 +170,6 @@ export default function UploadPage() {
             />
           </div>
 
-          {/* Severity */}
           <div className="space-y-2">
             <label className="text-sm font-medium">Severity</label>
             <div className="flex gap-2 flex-wrap">
@@ -166,7 +189,6 @@ export default function UploadPage() {
             </div>
           </div>
 
-          {/* Visibility */}
           <div className="space-y-2">
             <label className="text-sm font-medium">Visibility</label>
             <div className="flex gap-2">
@@ -186,7 +208,6 @@ export default function UploadPage() {
             </div>
           </div>
 
-          {/* Tags */}
           <div className="space-y-2">
             <label className="text-sm font-medium">Tags</label>
             <div className="flex gap-2">
@@ -217,7 +238,6 @@ export default function UploadPage() {
         </CardContent>
       </Card>
 
-      {/* File Upload */}
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Evidence Files</CardTitle>
@@ -268,8 +288,13 @@ export default function UploadPage() {
         </CardContent>
       </Card>
 
-      <Button onClick={handleSubmit} className="w-full" size="lg">
-        Submit to ShelbyVault
+      <Button
+        onClick={handleSubmit}
+        className="w-full"
+        size="lg"
+        disabled={submitting}
+      >
+        {submitting ? "Uploading to ShelbyVault..." : "Submit to ShelbyVault"}
       </Button>
     </div>
   );
